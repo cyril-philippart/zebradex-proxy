@@ -54,15 +54,35 @@ app.get("/zebradex/value", async (req, res) => {
     const currentValue = values[values.length - 1];
     const currentCost = costs[costs.length - 1];
 
+    const previousValue = values[values.length - 2];
+    const startValue = values[0];
+
+    const profit = currentValue - currentCost;
+    const profitPct = profit / currentCost;
+
+    const change1D = currentValue - previousValue;
+    const change1DPct = change1D / previousValue;
+
+    const changePeriod = currentValue - startValue;
+    const changePeriodPct = changePeriod / startValue;
+
     res.json({
-      ok: true,
-      current_value: currentValue,
-      current_cost: currentCost,
-      profit: currentValue - currentCost,
-      profit_pct: (currentValue - currentCost) / currentCost,
-      change: currentValue - values[0],
-      change_pct: (currentValue - values[0]) / values[0],
-      raw: json.data,
+    ok: true,
+    days: Number(days),
+
+    current_value: currentValue,
+    current_cost: currentCost,
+
+    profit: profit,
+    profit_pct: profitPct,
+
+    change_1d: change1D,
+    change_1d_pct: change1DPct,
+
+    change_period: changePeriod,
+    change_period_pct: changePeriodPct,
+
+    raw: json.data
     });
 
   } catch (err) {
