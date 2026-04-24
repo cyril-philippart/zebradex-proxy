@@ -12,7 +12,7 @@ app.get("/", (req, res) => {
 app.get("/zebradex/value", async (req, res) => {
   try {
     const contextId = req.query.context_id;
-    const days = req.query.days || 7;
+    const days = req.query.days || 15;
 
     if (!contextId) {
       return res.status(400).json({ ok: false, error: "context_id manquant" });
