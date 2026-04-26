@@ -3,8 +3,6 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const REFRESH_TOKEN = process.env.ZEBRADEX_REFRESH_TOKEN;
-
 app.get("/", (req, res) => {
   res.json({ ok: true, service: "zebradex-proxy" });
 });
@@ -12,23 +10,33 @@ app.get("/", (req, res) => {
 app.get("/zebradex/value", async (req, res) => {
   try {
     const contextId = req.query.context_id;
-    const days = req.query.days || 15;
+    const days = Number(req.query.days || 7);
 
     if (!contextId) {
-      return res.status(400).json({ ok: false, error: "context_id manquant" });
+      return res.status(400).json({
+        ok: false,
+        error: "context_id manquant",
+      });
     }
 
-    const tokens = await refreshZebradexToken();
+    if (!days || days < 1) {
+      return res.status(400).json({
+        ok: false,
+        error: "days invalide",
+      });
+    }
+
+    const tokens = await loginZebradex();
     const cookie = await createZebradexSession(tokens);
 
     const statsUrl =
-      `https://zebradex.fr/stats?type=all` +
-      `&perf=${days}d` +
-      `&context_id=${encodeURIComponent(contextId)}` +
-      `&view=overview` +
-      `&sort_mode=default` +
-      `&ajax=value_chart` +
-      `&days=${days}`;
+      "https://zebradex.fr/stats?type=all" +
+      "&perf=" + encodeURIComponent(days + "d") +
+      "&context_id=" + encodeURIComponent(contextId) +
+      "&view=overview" +
+      "&sort_mode=default" +
+      "&ajax=value_chart" +
+      "&days=" + encodeURIComponent(days);
 
     const statsRes = await fetch(statsUrl, {
       headers: {
@@ -43,11 +51,20 @@ app.get("/zebradex/value", async (req, res) => {
     if (text.startsWith("<")) {
       return res.status(401).json({
         ok: false,
-        error: "ZebraDex a renvoyé du HTML au lieu du JSON",
+        error: "ZEBRADEX_HTML_RESPONSE",
       });
     }
 
     const json = JSON.parse(text);
+
+    if (!json.ok || !json.data || !json.data.value || !json.data.cost) {
+      return res.status(500).json({
+        ok: false,
+        error: "ZEBRADEX_DATA_INVALID",
+        raw: json,
+      });
+    }
+
     const values = json.data.value;
     const costs = json.data.cost;
 
@@ -58,47 +75,55 @@ app.get("/zebradex/value", async (req, res) => {
     const startValue = values[0];
 
     const profit = currentValue - currentCost;
-    const profitPct = profit / currentCost;
+    const profitPct = currentCost ? profit / currentCost : null;
 
-    const change1D = currentValue - previousValue;
-    const change1DPct = change1D / previousValue;
+    const change1D = previousValue ? currentValue - previousValue : null;
+    const change1DPct = previousValue ? change1D / previousValue : null;
 
     const changePeriod = currentValue - startValue;
-    const changePeriodPct = changePeriod / startValue;
+    const changePeriodPct = startValue ? changePeriod / startValue : null;
 
-    res.json({
-    ok: true,
-    days: Number(days),
+    return res.json({
+      ok: true,
+      days,
 
-    current_value: currentValue,
-    current_cost: currentCost,
+      current_value: currentValue,
+      current_cost: currentCost,
 
-    profit: profit,
-    profit_pct: profitPct,
+      profit,
+      profit_pct: profitPct,
 
-    change_1d: change1D,
-    change_1d_pct: change1DPct,
+      change_1d: change1D,
+      change_1d_pct: change1DPct,
 
-    change_period: changePeriod,
-    change_period_pct: changePeriodPct,
+      change_period: changePeriod,
+      change_period_pct: changePeriodPct,
 
-    raw: json.data
+      raw: json.data,
     });
 
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    return res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
   }
 });
 
-async function refreshZebradexToken() {
-  if (!REFRESH_TOKEN) {
-    throw new Error("ZEBRADEX_REFRESH_TOKEN manquant");
+async function loginZebradex() {
+  const username = process.env.ZEBRADEX_USERNAME;
+  const password = process.env.ZEBRADEX_PASSWORD;
+
+  if (!username || !password) {
+    throw new Error("ZEBRADEX_USERNAME ou ZEBRADEX_PASSWORD manquant");
   }
 
   const body = new URLSearchParams({
-    grant_type: "refresh_token",
+    grant_type: "password",
     client_id: "frontend",
-    refresh_token: REFRESH_TOKEN,
+    username,
+    password,
+    scope: "openid email profile",
   });
 
   const response = await fetch(
@@ -115,8 +140,8 @@ async function refreshZebradexToken() {
 
   const json = await response.json();
 
-  if (!response.ok || !json.access_token) {
-    throw new Error("Refresh token invalide: " + JSON.stringify(json));
+  if (!response.ok || !json.access_token || !json.id_token) {
+    throw new Error("LOGIN_ZEBRADEX_FAILED: " + JSON.stringify(json));
   }
 
   return json;
