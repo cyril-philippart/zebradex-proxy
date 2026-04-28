@@ -3,6 +3,10 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Cache mémoire par clé : contextId + days
+const cache = new Map();
+const CACHE_TTL_MS = 60 * 1000; // 60 secondes
+
 app.get("/", (req, res) => {
   res.json({ ok: true, service: "zebradex-proxy" });
 });
@@ -23,6 +27,17 @@ app.get("/zebradex/value", async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: "days invalide",
+      });
+    }
+
+    const cacheKey = `${contextId}_${days}`;
+    const cached = cache.get(cacheKey);
+    const now = Date.now();
+
+    if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+      return res.json({
+        ...cached.data,
+        cached: true,
       });
     }
 
@@ -83,8 +98,9 @@ app.get("/zebradex/value", async (req, res) => {
     const changePeriod = currentValue - startValue;
     const changePeriodPct = startValue ? changePeriod / startValue : null;
 
-    return res.json({
+    const result = {
       ok: true,
+      cached: false,
       days,
 
       current_value: currentValue,
@@ -100,7 +116,14 @@ app.get("/zebradex/value", async (req, res) => {
       change_period_pct: changePeriodPct,
 
       raw: json.data,
+    };
+
+    cache.set(cacheKey, {
+      timestamp: now,
+      data: result,
     });
+
+    return res.json(result);
 
   } catch (err) {
     return res.status(500).json({
